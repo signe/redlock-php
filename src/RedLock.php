@@ -1,4 +1,5 @@
 <?php
+namespace RedLock;
 
 class RedLock
 {
@@ -76,19 +77,33 @@ class RedLock
         $resource = $lock['resource'];
         $token    = $lock['token'];
 
+        $success = 0;
+        $fail = 0;
         foreach ($this->instances as $instance) {
-            $this->unlockInstance($instance, $resource, $token);
+            if ($this->unlockInstance($instance, $resource, $token)) {
+                $success += 1;
+            } else {
+                $fail += 1;
+            }
         }
+        return $fail == 0;
     }
 
     private function initInstances()
     {
         if (empty($this->instances)) {
             foreach ($this->servers as $server) {
-                list($host, $port, $timeout) = $server;
-                $redis = new \Redis();
-                $redis->connect($host, $port, $timeout);
-
+                if ($server instanceof \Redis) {
+                    if ($server->isConnected()) {
+                        $redis = $server;
+                    } else {
+                        throw new \Exception("If you use \\Redis objects as argument, the \\Redis object must be connected.");
+                    }
+                } else {
+                    list($host, $port, $timeout) = $server;
+                    $redis = new \Redis();
+                    $redis->connect($host, $port, $timeout);
+                }
                 $this->instances[] = $redis;
             }
         }
@@ -108,6 +123,13 @@ class RedLock
                 return 0
             end
         ';
-        return $instance->eval($script, [$resource, $token], 1);
+
+        // If the redis object is using igbinary as serializer
+        // we need to call serialize to make sure we the
+        // value is serialized the same way in our above Lua
+        // as when we called ->set()
+        $serializedToken = $instance->_serialize($token);
+
+        return $instance->eval($script, [$resource, $serializedToken], 1);
     }
 }
