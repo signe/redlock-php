@@ -3,16 +3,16 @@ namespace RedLock;
 
 class RedLock
 {
-    private $retryDelay;
-    private $retryCount;
-    private $clockDriftFactor = 0.01;
+    protected $retryDelay;
+    protected $retryCount;
+    protected $clockDriftFactor = 0.01;
 
-    private $quorum;
+    protected $quorum;
 
-    private $servers = array();
-    private $instances = array();
+    protected $servers = array();
+    protected $instances = array();
 
-    function __construct(array $servers, $retryDelay = 200, $retryCount = 3)
+    public function __construct(array $servers, $retryDelay = 200, $retryCount = 3)
     {
         $this->servers = $servers;
 
@@ -89,7 +89,7 @@ class RedLock
         return $fail == 0;
     }
 
-    private function initInstances()
+    protected function initInstances()
     {
         if (empty($this->instances)) {
             foreach ($this->servers as $server) {
@@ -97,9 +97,19 @@ class RedLock
                     if ($server->isConnected()) {
                         $redis = $server;
                     } else {
-                        throw new \Exception("If you use \\Redis objects as argument, the \\Redis object must be connected.");
+                        throw new \Exception("If you use \\Redis objects as argument, the object must be connected.");
                     }
                 } else {
+                    if (empty($server[0])) {
+                        throw new \Exception("A server hostname or IP is required");
+                    }
+
+                    if (empty($server[1])) {
+                        $server[1] = 6379;
+                    }
+                    if (empty($server[2])) {
+                        $server[2] = 0;
+                    }
                     list($host, $port, $timeout) = $server;
                     $redis = new \Redis();
                     $redis->connect($host, $port, $timeout);
@@ -109,12 +119,12 @@ class RedLock
         }
     }
 
-    private function lockInstance($instance, $resource, $token, $ttl)
+    protected function lockInstance($instance, $resource, $token, $ttl)
     {
         return $instance->set($resource, $token, ['NX', 'PX' => $ttl]);
     }
 
-    private function unlockInstance($instance, $resource, $token)
+    protected function unlockInstance($instance, $resource, $token)
     {
         $script = '
             if redis.call("GET", KEYS[1]) == ARGV[1] then
