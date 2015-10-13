@@ -1,17 +1,42 @@
 <?php
+/**
+ * Implementation of Redis distributed locks
+ *
+ * @see http://redis.io/topics/distlock
+ */
+
 namespace RedLock;
 
+/**
+ * Class RedLock
+ *
+ * @package RedLock
+ */
 class RedLock
 {
+
     protected $retryDelay;
     protected $retryCount;
     protected $clockDriftFactor = 0.01;
 
     protected $quorum;
 
-    protected $servers = array();
-    protected $instances = array();
+    /**
+     * @var array[]|\Redis[]
+     */
+    protected $servers = [];
 
+    /**
+     * @var \Redis[]
+     */
+    protected $instances = [];
+
+    /**
+     * @param array[]|\Redis[] $servers    Array of server tuples [host, port, timeout],
+     *                                     or pre-connected \Redis objects
+     * @param int              $retryDelay Delay in milliseconds between retries
+     * @param int              $retryCount Number of retries to attempt
+     */
     public function __construct(array $servers, $retryDelay = 200, $retryCount = 3)
     {
         $this->servers = $servers;
@@ -19,9 +44,15 @@ class RedLock
         $this->retryDelay = $retryDelay;
         $this->retryCount = $retryCount;
 
-        $this->quorum  = min(count($servers), (count($servers) / 2 + 1));
+        $this->quorum = min(count($servers), (count($servers) / 2 + 1));
     }
 
+    /**
+     * @param string $resource Name of the resource to be locked
+     * @param int    $ttl      Time in seconds for the lock to be held
+     * @return array|bool
+     * @throws \Exception
+     */
     public function lock($resource, $ttl)
     {
         $this->initInstances();
@@ -40,20 +71,19 @@ class RedLock
                 }
             }
 
-            # Add 2 milliseconds to the drift to account for Redis expires
-            # precision, which is 1 millisecond, plus 1 millisecond min drift
-            # for small TTLs.
+            // Add 2 milliseconds to the drift to account for Redis expires
+            // precision, which is 1 millisecond, plus 1 millisecond min drift
+            // for small TTLs.
             $drift = ($ttl * $this->clockDriftFactor) + 2;
 
             $validityTime = $ttl - (microtime(true) * 1000 - $startTime) - $drift;
 
             if ($n >= $this->quorum && $validityTime > 0) {
                 return [
-                    'validity' => $validityTime,
-                    'resource' => $resource,
-                    'token'    => $token,
+                        'validity' => $validityTime,
+                        'resource' => $resource,
+                        'token'    => $token,
                 ];
-
             } else {
                 foreach ($this->instances as $instance) {
                     $this->unlockInstance($instance, $resource, $token);
@@ -65,12 +95,16 @@ class RedLock
             usleep($delay * 1000);
 
             $retry--;
-
         } while ($retry > 0);
 
         return false;
     }
 
+    /**
+     * @param array $lock Array returned from lock()
+     * @return bool
+     * @throws \Exception
+     */
     public function unlock(array $lock)
     {
         $this->initInstances();
@@ -78,7 +112,7 @@ class RedLock
         $token    = $lock['token'];
 
         $success = 0;
-        $fail = 0;
+        $fail    = 0;
         foreach ($this->instances as $instance) {
             if ($this->unlockInstance($instance, $resource, $token)) {
                 $success += 1;
@@ -86,9 +120,15 @@ class RedLock
                 $fail += 1;
             }
         }
+
         return $fail == 0;
     }
 
+    /**
+     * Create the Redis connections
+     *
+     * @throws \Exception
+     */
     protected function initInstances()
     {
         if (empty($this->instances)) {
@@ -119,12 +159,25 @@ class RedLock
         }
     }
 
-    protected function lockInstance($instance, $resource, $token, $ttl)
+    /**
+     * @param \Redis $instance Server instance to be locked
+     * @param string $resource Resource name to be locked
+     * @param mixed  $token    Lock token
+     * @param int    $ttl      Time to live
+     * @return mixed
+     */
+    protected function lockInstance(\Redis $instance, $resource, $token, $ttl)
     {
         return $instance->set($resource, $token, ['NX', 'PX' => $ttl]);
     }
 
-    protected function unlockInstance($instance, $resource, $token)
+    /**
+     * @param \Redis $instance Server instance to be unlocked
+     * @param string $resource Resource name to be unlocked
+     * @param string $token    Lock token for verification
+     * @return mixed
+     */
+    protected function unlockInstance(\Redis $instance, $resource, $token)
     {
         $script = '
             if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -134,7 +187,7 @@ class RedLock
             end
         ';
 
-        // If the redis object is using igbinary as serializer
+        // If the redis object is using igBinary as serializer
         // we need to call serialize to make sure we the
         // value is serialized the same way in our above Lua
         // as when we called ->set()
