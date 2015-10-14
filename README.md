@@ -2,16 +2,20 @@ redlock-php - Redis distributed locks in PHP
 
 Based on [Redlock-rb](https://github.com/antirez/redlock-rb) by [Salvatore Sanfilippo](https://github.com/antirez)
 
-This library implements the Redis-based distributed lock manager algorithm [described in this blog post](http://antirez.com/news/77).
+This library implements the Redis-based distributed lock manager algorithm [described in this Redis article](http://redis.io/topics/distlock.
 
 To create a lock manager:
 
+Locks can be provided using an array of server tuples made up of the server name (required), connection port (optional), and connection timeout (optional), or by using already-connected Redis objects,
+
 ```php
+$server = new \Redis;
+$server->connect('127.0.0.1');
 
 $servers = [
     ['127.0.0.1', 6379, 0.01],
-    ['127.0.0.1', 6389, 0.01],
-    ['127.0.0.1', 6399, 0.01],
+    ['127.0.0.1'],
+    $server,
 ];
 
 $redLock = new RedLock($servers);
@@ -26,11 +30,9 @@ $lock = $redLock->lock('my_resource_name', 1000);
 
 ```
 
-Where the resource name is an unique identifier of what you are trying to lock
-and 1000 is the number of milliseconds for the validity time.
+Where the resource name is an unique identifier of what you are trying to lock and 1000 is the number of milliseconds for the validity time.
 
-The returned value is `false` if the lock was not acquired (you may try again),
-otherwise an array representing the lock is returned, having three keys:
+The returned value is `false` if the lock was not acquired (you may try again), otherwise an array representing the lock is returned, having three keys:
 
 ```php
 Array
@@ -57,6 +59,4 @@ delay (by default 200 milliseconds) used to acquire the lock.
 The retry delay is actually chosen at random between `$retryDelay / 2` milliseconds and
 the specified `$retryDelay` value.
 
-**Disclaimer**: As stated in the original antirez's version, this code implements an algorithm
-which is currently a proposal, it was not formally analyzed. Make sure to understand how it works
-before using it in your production environments.
+**Disclaimer**: As stated in the original antirez's version, this code implements an algorithm which is currently a proposal, it was not formally analyzed. Make sure to understand how it works before using it in your production environments.
