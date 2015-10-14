@@ -49,7 +49,7 @@ class RedLock
 
     /**
      * @param string $resource Name of the resource to be locked
-     * @param int    $ttl      Time in seconds for the lock to be held
+     * @param int    $ttl      Time in milliseconds for the lock to be held
      * @return array|bool
      * @throws \Exception
      */
@@ -163,7 +163,7 @@ class RedLock
      * @param \Redis $instance Server instance to be locked
      * @param string $resource Resource name to be locked
      * @param mixed  $token    Lock token
-     * @param int    $ttl      Time to live
+     * @param int    $ttl      Time to live in milliseconds
      * @return mixed
      */
     protected function lockInstance(\Redis $instance, $resource, $token, $ttl)
