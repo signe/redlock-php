@@ -53,11 +53,11 @@ class RedLock
      * @return array|bool
      * @throws \Exception
      */
-    public function lock($resource, $ttl)
+    public function lock($resource, $ttl = 10000)
     {
         $this->initInstances();
 
-        $token = uniqid();
+        $token = base64_encode(openssl_random_pseudo_bytes(32));
         $retry = $this->retryCount;
 
         do {
@@ -72,7 +72,7 @@ class RedLock
             }
 
             // Add 2 milliseconds to the drift to account for Redis expires
-            // precision, which is 1 millisecond, plus 1 millisecond min drift
+            // precision, which is 1 millisecond, plus 2 millisecond min drift
             // for small TTLs.
             $drift = ($ttl * $this->clockDriftFactor) + 2;
 
