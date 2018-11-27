@@ -15,11 +15,18 @@ namespace RedLock;
 class RedLock
 {
 
-    protected $retryDelay;
-    protected $retryCount;
     protected $clockDriftFactor = 0.01;
 
+    /**
+     * @var \Redis[]
+     */
+    protected $instances = [];
+
     protected $quorum;
+
+    protected $retryCount;
+
+    protected $retryDelay;
 
     /**
      * @var array[]|\Redis[]
@@ -27,17 +34,12 @@ class RedLock
     protected $servers = [];
 
     /**
-     * @var \Redis[]
-     */
-    protected $instances = [];
-
-    /**
      * @param array[]|\Redis[] $servers    Array of server tuples [host, port, timeout],
      *                                     or pre-connected \Redis objects
      * @param int              $retryDelay Delay in milliseconds between retries
      * @param int              $retryCount Number of retries to attempt
      */
-    public function __construct(array $servers, $retryDelay = 200, $retryCount = 3)
+    public function __construct(array $servers, int $retryDelay = 200, int $retryCount = 3)
     {
         $this->servers = $servers;
 
@@ -48,12 +50,44 @@ class RedLock
     }
 
     /**
+     * Create the Redis connections
+     */
+    protected function initInstances()
+    {
+        if (empty($this->instances)) {
+            foreach ($this->servers as $server) {
+                if ($server instanceof \Redis) {
+                    if ($server->isConnected()) {
+                        $redis = $server;
+                    } else {
+                        throw new \InvalidArgumentException("If you use \\Redis objects as argument, the object must be connected.");
+                    }
+                } else {
+                    if (empty($server[0])) {
+                        throw new \InvalidArgumentException("A server hostname or IP is required");
+                    }
+
+                    if (empty($server[1])) {
+                        $server[1] = 6379;
+                    }
+                    if (empty($server[2])) {
+                        $server[2] = 0;
+                    }
+                    list($host, $port, $timeout) = $server;
+                    $redis = new \Redis();
+                    $redis->connect($host, $port, $timeout);
+                }
+                $this->instances[] = $redis;
+            }
+        }
+    }
+
+    /**
      * @param string $resource Name of the resource to be locked
      * @param int    $ttl      Time in milliseconds for the lock to be held
      * @return array|bool
-     * @throws \Exception
      */
-    public function lock($resource, $ttl = 10000)
+    public function lock(string $resource, int $ttl = 10000)
     {
         $this->initInstances();
 
@@ -80,9 +114,9 @@ class RedLock
 
             if ($n >= $this->quorum && $validityTime > 0) {
                 return [
-                        'validity' => $validityTime,
-                        'resource' => $resource,
-                        'token'    => $token,
+                    'validity' => $validityTime,
+                    'resource' => $resource,
+                    'token'    => $token,
                 ];
             } else {
                 foreach ($this->instances as $instance) {
@@ -101,11 +135,22 @@ class RedLock
     }
 
     /**
+     * @param \Redis $instance Server instance to be locked
+     * @param string $resource Resource name to be locked
+     * @param string $token    Lock token
+     * @param int    $ttl      Time to live in milliseconds
+     * @return bool
+     */
+    protected function lockInstance(\Redis $instance, string $resource, string $token, int $ttl): bool
+    {
+        return $instance->set($resource, $token, ['NX', 'PX' => $ttl]);
+    }
+
+    /**
      * @param array $lock Array returned from lock()
      * @return bool
-     * @throws \Exception
      */
-    public function unlock(array $lock)
+    public function unlock(array $lock): bool
     {
         $this->initInstances();
         $resource = $lock['resource'];
@@ -125,59 +170,12 @@ class RedLock
     }
 
     /**
-     * Create the Redis connections
-     *
-     * @throws \Exception
-     */
-    protected function initInstances()
-    {
-        if (empty($this->instances)) {
-            foreach ($this->servers as $server) {
-                if ($server instanceof \Redis) {
-                    if ($server->isConnected()) {
-                        $redis = $server;
-                    } else {
-                        throw new \Exception("If you use \\Redis objects as argument, the object must be connected.");
-                    }
-                } else {
-                    if (empty($server[0])) {
-                        throw new \Exception("A server hostname or IP is required");
-                    }
-
-                    if (empty($server[1])) {
-                        $server[1] = 6379;
-                    }
-                    if (empty($server[2])) {
-                        $server[2] = 0;
-                    }
-                    list($host, $port, $timeout) = $server;
-                    $redis = new \Redis();
-                    $redis->connect($host, $port, $timeout);
-                }
-                $this->instances[] = $redis;
-            }
-        }
-    }
-
-    /**
-     * @param \Redis $instance Server instance to be locked
-     * @param string $resource Resource name to be locked
-     * @param mixed  $token    Lock token
-     * @param int    $ttl      Time to live in milliseconds
-     * @return mixed
-     */
-    protected function lockInstance(\Redis $instance, $resource, $token, $ttl)
-    {
-        return $instance->set($resource, $token, ['NX', 'PX' => $ttl]);
-    }
-
-    /**
      * @param \Redis $instance Server instance to be unlocked
      * @param string $resource Resource name to be unlocked
      * @param string $token    Lock token for verification
-     * @return mixed
+     * @return int
      */
-    protected function unlockInstance(\Redis $instance, $resource, $token)
+    protected function unlockInstance(\Redis $instance, string $resource, string $token): int
     {
         $script = '
             if redis.call("GET", KEYS[1]) == ARGV[1] then
